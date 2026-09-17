@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -14,12 +16,17 @@ import (
 type Server struct {
 	log       *slog.Logger
 	scheduler *scheduler.Scheduler
+	nodeTTL   time.Duration
 	mu        sync.RWMutex
 	nodes     map[string]model.Node
 }
 
-func New(log *slog.Logger) *Server {
-	return &Server{log: log, scheduler: scheduler.New(), nodes: make(map[string]model.Node)}
+func New(log *slog.Logger, nodeTTL ...time.Duration) *Server {
+	ttl := 45 * time.Second
+	if len(nodeTTL) > 0 && nodeTTL[0] > 0 {
+		ttl = nodeTTL[0]
+	}
+	return &Server{log: log, scheduler: scheduler.New(), nodeTTL: ttl, nodes: make(map[string]model.Node)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -37,9 +44,19 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	var n model.Node
-	if err := json.NewDecoder(r.Body).Decode(&n); err != nil || n.ID == "" {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&n); err != nil || n.ID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid node heartbeat"})
 		return
+	}
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		peerCN := r.TLS.PeerCertificates[0].Subject.CommonName
+		if peerCN == "" || subtle.ConstantTimeCompare([]byte(peerCN), []byte(n.ID)) != 1 {
+			s.log.Warn("heartbeat certificate identity mismatch", "node_id", n.ID, "certificate_cn", peerCN)
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "client certificate identity does not match node id"})
+			return
+		}
 	}
 	n.LastSeen = time.Now().UTC()
 	n.Online = true
@@ -50,33 +67,36 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listNodes(w http.ResponseWriter, _ *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	nodes := make([]model.Node, 0, len(s.nodes))
-	for _, n := range s.nodes {
-		nodes = append(nodes, n)
-	}
-	writeJSON(w, http.StatusOK, nodes)
+	writeJSON(w, http.StatusOK, s.snapshotNodes(time.Now().UTC()))
 }
 
 func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	var req model.JobRequirements
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid requirements"})
 		return
 	}
-	s.mu.RLock()
-	nodes := make([]model.Node, 0, len(s.nodes))
-	for _, n := range s.nodes {
-		nodes = append(nodes, n)
-	}
-	s.mu.RUnlock()
-	placement, err := s.scheduler.Place(req, nodes)
+	placement, err := s.scheduler.Place(req, s.snapshotNodes(time.Now().UTC()))
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, placement)
+}
+
+func (s *Server) snapshotNodes(now time.Time) []model.Node {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	nodes := make([]model.Node, 0, len(s.nodes))
+	for _, stored := range s.nodes {
+		n := stored
+		n.Online = !n.LastSeen.IsZero() && now.Sub(n.LastSeen) <= s.nodeTTL
+		nodes = append(nodes, n)
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	return nodes
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -35,6 +35,7 @@ type Capacity struct {
 
 type Node struct {
 	ID           string        `json:"id"`
+	Endpoint     string        `json:"endpoint,omitempty"`
 	OS           OS            `json:"os"`
 	Arch         Arch          `json:"arch"`
 	Backends     []BackendKind `json:"backends"`

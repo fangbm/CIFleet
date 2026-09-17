@@ -11,11 +11,13 @@
 
 ## M1 - Real node control
 
-- [ ] Agent authentication (mTLS recommended).
-- [ ] Periodic agent heartbeat with capacity probing.
-- [ ] Docker backend create/destroy.
-- [ ] Repository-scoped cache mounts.
-- [ ] Job timeout and orphan cleanup.
+- [x] TLS 1.3 mutual authentication with node-ID certificate binding.
+- [x] Periodic agent heartbeat with Docker capacity probing and node TTL.
+- [x] Docker backend create/destroy API.
+- [x] Repository-scoped cache mounts.
+- [x] Job timeout and restart-safe orphan cleanup via Docker labels.
+
+See [`M1.md`](M1.md) for deployment and smoke-test instructions.
 
 ## M2 - GitHub integration
 

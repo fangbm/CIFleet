@@ -14,7 +14,7 @@ own heterogeneous machines when needed (for example when hosted Actions quota is
               +----------------+----------------+
               |                |                |
         Linux x86_64      Linux arm64      Windows x86_64
-             
+
 ```
 
 macOS is intentionally not part of V1, but the scheduler and backend model leave room
@@ -32,47 +32,38 @@ for a future macOS arm64 worker using a native/virtualization backend.
 
 ## V1 scope
 
-- Go controller.
-- Go node agent.
-- Linux x86_64 node: Docker + KVM/libvirt backend.
-- Linux arm64 node: Docker backend.
-- Windows x86_64 node: Hyper-V backend.
+- Go controller and Go node agent.
 - Capability-aware scheduler.
-- Node heartbeats and basic health state.
-- GitHub webhook / JIT runner integration points.
-- Hosted Actions quota policy integration point.
-
-The current initial commit is a compiling architecture skeleton. GitHub App auth,
-webhook verification, JIT runner creation, Docker/libvirt/Hyper-V lifecycle operations,
-and quota switching are intentionally staged for subsequent milestones.
+- **M1 complete:** TLS 1.3 mTLS, certificate-bound worker identity, periodic heartbeat,
+  Docker capacity probing, stale-node detection, Docker create/destroy, repo-scoped cache
+  mounts, and restart-safe deadline/orphan cleanup.
+- Linux x86_64: Docker today; KVM/libvirt is M3.
+- Linux arm64: Docker path reuses the same agent/backend and will be brought online after
+  the first x86_64 Linux path is validated.
+- Windows x86_64: Hyper-V is M3.
+- GitHub webhook/JIT runner lifecycle is M2.
+- Hosted Actions quota fallback is M4.
 
 ## Quick start
 
+Run the test suite first:
+
 ```bash
 go test ./...
-go run ./cmd/controller -listen :8080
-go run ./cmd/agent -listen :8090 -node-id raspberry
+go vet ./...
 ```
 
-Check controller health:
+For an actual two-node deployment, generate a local CA and node certificates, install the
+controller on the Raspberry Pi and the agent on the Linux x86_64 host, then smoke-test Docker
+through mTLS. The exact commands are in [docs/M1.md](docs/M1.md).
+
+For localhost-only development without certificates, both binaries support the explicit
+`-insecure-http` flag:
 
 ```bash
-curl http://localhost:8080/healthz
-```
-
-Register/update a worker heartbeat:
-
-```bash
-curl -X POST http://localhost:8080/v1/nodes/heartbeat \
-  -H 'content-type: application/json' \
-  -d '{
-    "id":"e5",
-    "os":"linux",
-    "arch":"amd64",
-    "backends":["docker","kvm"],
-    "capabilities":["container","vm"],
-    "online":true
-  }'
+go run ./cmd/controller -insecure-http -listen :8080
+go run ./cmd/agent -insecure-http -listen :8090 -node-id e5 \
+  -controller-url http://127.0.0.1:8080
 ```
 
 ## Repository policy idea
@@ -102,4 +93,5 @@ Public/untrusted pull requests should remain on GitHub-hosted runners unless a s
 sandboxing policy is explicitly configured. Long-lived GitHub credentials must stay in
 the controller; workers should receive short-lived job-specific material only.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M1.md](docs/M1.md), and
+[docs/ROADMAP.md](docs/ROADMAP.md).
