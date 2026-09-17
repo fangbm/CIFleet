@@ -1,22 +1,12 @@
 [Unit]
-Description=CIFleet agent
+Description=cifleet agent
 After=network-online.target docker.service
-Wants=network-online.target docker.service
+Wants=network-online.target
 
 [Service]
-Type=simple
-# Docker socket access is host-root-equivalent. V1 runs the worker agent as root;
-# isolate untrusted CI inside the ephemeral Docker instance, not in the agent process.
-User=root
-EnvironmentFile=-/etc/cifleet/agent.env
-ExecStart=/usr/local/bin/cifleet-agent
+ExecStart=/usr/local/bin/cifleet-agent -listen :8090 -node-id %H
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/cifleet
 
 [Install]
 WantedBy=multi-user.target

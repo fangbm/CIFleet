@@ -58,20 +58,17 @@ func New(cfg Config) *Backend {
 	}
 	return &Backend{cfg: cfg, run: execRunner{}}
 }
-
 func newWithRunner(cfg Config, runner commandRunner) *Backend {
 	b := New(cfg)
 	b.run = runner
 	return b
 }
-
 func (b *Backend) Kind() model.BackendKind { return model.BackendDocker }
 
 func (b *Backend) Capacity(ctx context.Context) (model.Capacity, error) {
 	if _, err := b.run.Run(ctx, b.cfg.Binary, "info", "--format", "{{.ServerVersion}}"); err != nil {
 		return model.Capacity{}, fmt.Errorf("docker unavailable: %w", err)
 	}
-
 	totalMemory, availableMemory, err := memoryMB()
 	if err != nil {
 		return model.Capacity{}, err
@@ -80,7 +77,6 @@ func (b *Backend) Capacity(ctx context.Context) (model.Capacity, error) {
 	if err != nil {
 		return model.Capacity{}, err
 	}
-
 	reservedCPU, reservedMemory := 0, 0
 	for _, id := range ids {
 		out, err := b.run.Run(ctx, b.cfg.Binary, "inspect", "--format", `{{index .Config.Labels "io.cifleet.cpu"}}|{{index .Config.Labels "io.cifleet.memory_mb"}}`, id)
@@ -93,19 +89,11 @@ func (b *Backend) Capacity(ctx context.Context) (model.Capacity, error) {
 			reservedMemory += parseNonNegativeInt(parts[1])
 		}
 	}
-
 	totalCPU := runtime.NumCPU()
 	freeCPU := max(0, totalCPU-reservedCPU)
 	reservationFreeMemory := max(0, totalMemory-reservedMemory)
 	freeMemory := min(availableMemory, reservationFreeMemory)
-
-	return model.Capacity{
-		TotalCPU:     totalCPU,
-		FreeCPU:      freeCPU,
-		TotalMemoryM: totalMemory,
-		FreeMemoryM:  freeMemory,
-		RunningJobs:  len(ids),
-	}, nil
+	return model.Capacity{TotalCPU: totalCPU, FreeCPU: freeCPU, TotalMemoryM: totalMemory, FreeMemoryM: freeMemory, RunningJobs: len(ids)}, nil
 }
 
 func (b *Backend) Create(ctx context.Context, spec backend.JobSpec) (*backend.Instance, error) {
@@ -115,30 +103,18 @@ func (b *Backend) Create(ctx context.Context, spec backend.JobSpec) (*backend.In
 	if spec.CPU < 0 || spec.MemoryM < 0 {
 		return nil, errors.New("cpu and memory must be non-negative")
 	}
-
 	name := "cifleet-" + sanitizeName(spec.ID)
 	if name == "cifleet-" {
 		return nil, errors.New("job id has no usable characters")
 	}
 	deadline := time.Now().UTC().Add(spec.EffectiveTimeout(b.cfg.DefaultTimeout))
-
-	args := []string{
-		"run", "-d", "--name", name,
-		"--label", managedLabel + "=true",
-		"--label", "io.cifleet.node=" + b.cfg.NodeID,
-		"--label", "io.cifleet.job_id=" + spec.ID,
-		"--label", "io.cifleet.repository=" + spec.Repository,
-		"--label", "io.cifleet.deadline=" + strconv.FormatInt(deadline.Unix(), 10),
-		"--label", "io.cifleet.cpu=" + strconv.Itoa(spec.CPU),
-		"--label", "io.cifleet.memory_mb=" + strconv.Itoa(spec.MemoryM),
-	}
+	args := []string{"run", "-d", "--name", name, "--label", managedLabel + "=true", "--label", "io.cifleet.node=" + b.cfg.NodeID, "--label", "io.cifleet.job_id=" + spec.ID, "--label", "io.cifleet.repository=" + spec.Repository, "--label", "io.cifleet.deadline=" + strconv.FormatInt(deadline.Unix(), 10), "--label", "io.cifleet.cpu=" + strconv.Itoa(spec.CPU), "--label", "io.cifleet.memory_mb=" + strconv.Itoa(spec.MemoryM)}
 	if spec.CPU > 0 {
 		args = append(args, "--cpus", strconv.Itoa(spec.CPU))
 	}
 	if spec.MemoryM > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dm", spec.MemoryM))
 	}
-
 	for key, value := range spec.Environment {
 		if strings.ContainsRune(key, '=') || key == "" {
 			return nil, fmt.Errorf("invalid environment variable name %q", key)
@@ -148,7 +124,6 @@ func (b *Backend) Create(ctx context.Context, spec backend.JobSpec) (*backend.In
 	if spec.RunnerConfig != "" {
 		args = append(args, "--env", "CIFLEET_RUNNER_CONFIG="+spec.RunnerConfig)
 	}
-
 	for _, mount := range spec.CacheMounts {
 		hostPath, err := b.cachePath(spec.Repository, mount.Name)
 		if err != nil {
@@ -166,7 +141,6 @@ func (b *Backend) Create(ctx context.Context, spec backend.JobSpec) (*backend.In
 		}
 		args = append(args, "--mount", mountArg)
 	}
-
 	args = append(args, spec.Image)
 	args = append(args, spec.Command...)
 	id, err := b.run.Run(ctx, b.cfg.Binary, args...)
@@ -175,15 +149,16 @@ func (b *Backend) Create(ctx context.Context, spec backend.JobSpec) (*backend.In
 	}
 	return &backend.Instance{ID: strings.TrimSpace(id), Backend: model.BackendDocker, NodeID: b.cfg.NodeID, Deadline: deadline}, nil
 }
-
 func (b *Backend) Destroy(ctx context.Context, instanceID string) error {
 	if strings.TrimSpace(instanceID) == "" {
 		return errors.New("instance id is required")
 	}
 	_, err := b.run.Run(ctx, b.cfg.Binary, "rm", "-f", instanceID)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such container") {
+		return nil
+	}
 	return err
 }
-
 func (b *Backend) CleanupExpired(ctx context.Context, now time.Time) (int, error) {
 	ids, err := b.managedContainerIDs(ctx, true)
 	if err != nil {
@@ -205,7 +180,6 @@ func (b *Backend) CleanupExpired(ctx context.Context, now time.Time) (int, error
 	}
 	return removed, nil
 }
-
 func (b *Backend) managedContainerIDs(ctx context.Context, all bool) ([]string, error) {
 	args := []string{"ps"}
 	if all {
@@ -221,7 +195,6 @@ func (b *Backend) managedContainerIDs(ctx context.Context, all bool) ([]string, 
 	}
 	return strings.Fields(out), nil
 }
-
 func (b *Backend) cachePath(repository, name string) (string, error) {
 	name = sanitizeName(name)
 	if name == "" {
@@ -231,14 +204,12 @@ func (b *Backend) cachePath(repository, name string) (string, error) {
 	repoKey := fmt.Sprintf("%x", sum[:8])
 	return filepath.Join(b.cfg.CacheRoot, repoKey, name), nil
 }
-
 func validateCacheTarget(target string) error {
 	if !filepath.IsAbs(target) || filepath.Clean(target) == string(filepath.Separator) {
 		return fmt.Errorf("cache target %q must be an absolute non-root path", target)
 	}
 	return nil
 }
-
 func sanitizeName(value string) string {
 	value = strings.ToLower(value)
 	var b strings.Builder
@@ -252,7 +223,6 @@ func sanitizeName(value string) string {
 	}
 	return strings.Trim(b.String(), "-._")
 }
-
 func parseNonNegativeInt(value string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || n < 0 {
@@ -260,7 +230,6 @@ func parseNonNegativeInt(value string) int {
 	}
 	return n
 }
-
 func memoryMB() (total, available int, err error) {
 	if runtime.GOOS != "linux" {
 		return 0, 0, errors.New("docker capacity memory probe currently requires linux")

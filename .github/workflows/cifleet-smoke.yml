@@ -1,0 +1,20 @@
+name: CIFleet Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, cifleet, linux-x64]
+    timeout-minutes: 10
+    steps:
+      - name: Verify ephemeral runner
+        shell: bash
+        run: |
+          echo "runner=$RUNNER_NAME"
+          uname -a
+          id
+          echo "CIFleet JIT runner OK"

@@ -1,96 +1,102 @@
 # Architecture
 
-## Components
+## Network planes
 
-### Controller
+CIFleet deliberately separates two trust domains:
 
-The controller is the only component that should hold long-lived GitHub credentials.
-It receives GitHub events, tracks hosted-runner quota policy, maintains worker state,
-selects a placement, obtains short-lived JIT runner material, and instructs a worker
-agent to launch an ephemeral environment.
+```text
+Internet / GitHub
+      |
+      | HTTPS + webhook HMAC
+      v
+reverse proxy/tunnel
+      |
+      v
+127.0.0.1:8081  Controller webhook ingress
 
-### Agent
+LAN
+Agent <==== TLS 1.3 mutual TLS ====> Controller :8080
+```
 
-An agent runs on each physical worker and exposes only the operations needed by the
-controller. V1 targets three worker profiles:
+The public webhook listener never replaces the M1 mTLS API. Worker control remains on the private authenticated plane.
 
-- Linux amd64: Docker + KVM/libvirt.
-- Linux arm64: Docker.
-- Windows amd64: Hyper-V.
+## Controller
 
-### Backends
+The controller is the only component that holds long-lived GitHub App credentials. It verifies `workflow_job` webhooks, persists job state, evaluates trust, tracks workers, selects placements, obtains short-lived JIT runner configuration, and instructs an agent to create/destroy an execution environment.
 
-Backends implement a common lifecycle:
+Queued work is persisted before provisioning. This makes a temporarily offline worker a scheduling condition rather than a lost webhook. Duplicate deliveries are absorbed by per-job state and short-lived completion/rejection tombstones.
 
-1. Probe capacity.
-2. Create an isolated execution environment.
-3. Inject short-lived runner configuration.
-4. Start the GitHub Actions runner.
-5. Report state/logs.
-6. Destroy the environment after one job.
+## Agent
 
-Docker is the preferred default for normal Linux builds. KVM/Hyper-V is preferred for
-full-OS tests, stronger isolation, Docker-daemon workloads, systemd/kernel tests, and
-native Windows toolchains.
+An agent runs on each physical worker. The worker's own certificate identifies its heartbeat to the controller. Conversely, worker control endpoints require the controller certificate identity (CN `controller` by default), so another worker certificate cannot create containers on its peers.
+
+Current worker profiles:
+
+- Linux amd64: Docker now; KVM later.
+- Linux arm64: Docker modelled/available as a worker target.
+- Windows amd64: Hyper-V planned.
+- macOS arm64: future native/virtualization backend.
+
+## GitHub job lifecycle (M2)
+
+```text
+workflow_job: queued
+      |
+      v
+verify X-Hub-Signature-256
+      |
+      v
+require cifleet marker label
+      |
+      v
+persist pending state
+      |
+      v
+fetch workflow run / apply trust policy
+      |
+      v
+scheduler selects eligible node/backend
+      |
+      v
+GitHub App installation token (controller memory only)
+      |
+      v
+generate repository JIT runner config
+      |
+      v
+mTLS create-instance request to agent
+      |
+      v
+ephemeral actions-runner container
+      |
+      v
+one GitHub Actions job
+      |
+      v
+workflow_job: completed
+      |
+      v
+destroy container + remove runner record
+```
+
+Installation tokens are cached only in controller memory. The worker receives the encoded JIT configuration, not the App private key or installation access token.
 
 ## Scheduler model
 
-A job declares requirements:
+A job is translated into:
 
 ```text
 OS + architecture + isolation + capabilities + CPU + memory
 ```
 
-A node advertises capabilities and current capacity. The scheduler matches the two and
-chooses the least-loaded eligible node. Physical host names are intentionally absent
-from repository workflows.
+A node advertises capabilities and current capacity. The scheduler chooses an eligible least-loaded node. M2 also reserves resources from active local job records so two queued webhooks cannot overcommit a node before the next heartbeat updates its reported capacity.
+
+## Isolation and caches
+
+One CI job maps to one ephemeral execution environment. Docker is the M2 Linux implementation. Workspaces disappear with the container. Only explicitly configured, repository-namespaced cache paths persist.
+
+The official Actions runner container is not treated as a security boundary strong enough for arbitrary hostile public PRs. Public fork PRs and `pull_request_target` jobs are rejected by the baseline M2 trust policy. Stronger isolation belongs on VM backends.
 
 ## Hosted runner fallback
 
-V1 should support a central policy state with two modes:
-
-- `hosted`: private repositories use GitHub-hosted runners.
-- `self-hosted`: eligible trusted jobs use cifleet labels.
-
-A quota monitor can switch the organization/repository variable before the monthly
-included quota is exhausted. Public/untrusted PR workloads should remain hosted by
-default.
-
-## Job lifecycle
-
-```text
-workflow job queued
-      |
-      v
-controller validates trust/policy
-      |
-      v
-scheduler selects node/backend
-      |
-      v
-controller requests GitHub JIT runner config
-      |
-      v
-agent creates Docker/KVM/Hyper-V instance
-      |
-      v
-one ephemeral runner handles one job
-      |
-      v
-logs/status collected
-      |
-      v
-instance destroyed; repository cache retained
-```
-
-## Cache model
-
-Workspaces are disposable. Only explicitly whitelisted cache paths are persistent and
-namespaced per repository. Examples include Cargo, pnpm, Gradle, pip/uv, and large model
-caches when appropriate.
-
-## Future macOS support
-
-macOS is represented in the model now (`os=macos`, `arch=arm64`) but has no V1 backend.
-A future Apple Silicon worker can add a native/virtualization backend without changing
-the scheduler contract.
+Hosted/self-hosted quota switching is M4. The intended model is a central repository/organization variable that normally resolves to `ubuntu-latest` and switches to CIFleet labels when hosted usage crosses a configured threshold.

@@ -26,6 +26,7 @@ func main() {
 	certFile := flag.String("cert-file", env("CIFLEET_CERT_FILE", "/etc/cifleet/pki/agent.crt"), "agent certificate")
 	keyFile := flag.String("key-file", env("CIFLEET_KEY_FILE", "/etc/cifleet/pki/agent.key"), "agent private key")
 	serverName := flag.String("controller-server-name", env("CIFLEET_CONTROLLER_SERVER_NAME", ""), "TLS server name override for the controller")
+	controllerIdentity := flag.String("controller-identity", env("CIFLEET_CONTROLLER_IDENTITY", "controller"), "expected controller client certificate common name")
 	dockerBin := flag.String("docker-bin", env("CIFLEET_DOCKER_BIN", "docker"), "Docker CLI path")
 	cacheRoot := flag.String("cache-root", env("CIFLEET_CACHE_ROOT", "/var/lib/cifleet/cache"), "repository-scoped cache root")
 	heartbeatInterval := flag.Duration("heartbeat-interval", envDuration("CIFLEET_HEARTBEAT_INTERVAL", 15*time.Second), "heartbeat interval")
@@ -37,12 +38,7 @@ func main() {
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	backend := dockerbackend.New(dockerbackend.Config{
-		Binary:         *dockerBin,
-		NodeID:         *nodeID,
-		CacheRoot:      *cacheRoot,
-		DefaultTimeout: *jobTimeout,
-	})
+	backend := dockerbackend.New(dockerbackend.Config{Binary: *dockerBin, NodeID: *nodeID, CacheRoot: *cacheRoot, DefaultTimeout: *jobTimeout})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -65,15 +61,7 @@ func main() {
 	}
 
 	if *controllerURL != "" {
-		svc := agent.NewService(agent.ServiceConfig{
-			NodeID:            *nodeID,
-			Endpoint:          *endpoint,
-			ControllerURL:     strings.TrimRight(*controllerURL, "/"),
-			HeartbeatInterval: *heartbeatInterval,
-			CleanupInterval:   *cleanupInterval,
-			Capabilities:      splitCSV(*capabilities),
-			Labels:            splitCSV(*labels),
-		}, backend, client, log)
+		svc := agent.NewService(agent.ServiceConfig{NodeID: *nodeID, Endpoint: *endpoint, ControllerURL: strings.TrimRight(*controllerURL, "/"), HeartbeatInterval: *heartbeatInterval, CleanupInterval: *cleanupInterval, Capabilities: splitCSV(*capabilities), Labels: splitCSV(*labels)}, backend, client, log)
 		go func() {
 			if err := svc.Run(ctx); err != nil {
 				log.Error("agent service stopped", "error", err)
@@ -84,12 +72,7 @@ func main() {
 		log.Warn("controller URL not set; heartbeats disabled")
 	}
 
-	httpServer := &http.Server{
-		Addr:              *listen,
-		Handler:           (&agent.Server{NodeID: *nodeID, Backend: backend}).Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		TLSConfig:         serverTLS,
-	}
+	httpServer := &http.Server{Addr: *listen, Handler: (&agent.Server{NodeID: *nodeID, ControllerIdentity: *controllerIdentity, Backend: backend}).Handler(), ReadHeaderTimeout: 5 * time.Second, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -105,7 +88,6 @@ func main() {
 		}
 		return
 	}
-
 	log.Info("agent starting with mTLS", "node_id", *nodeID, "listen", *listen, "controller", *controllerURL)
 	if err := httpServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 		log.Error("agent stopped", "error", err)
@@ -126,14 +108,12 @@ func splitCSV(value string) []string {
 	}
 	return out
 }
-
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
-
 func envDuration(key string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil {

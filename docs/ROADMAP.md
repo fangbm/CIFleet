@@ -1,6 +1,6 @@
 # Roadmap
 
-## M0 - Skeleton (this commit)
+## M0 - Skeleton
 
 - [x] Controller and agent binaries compile.
 - [x] Common node/job/placement model.
@@ -17,15 +17,20 @@
 - [x] Repository-scoped cache mounts.
 - [x] Job timeout and restart-safe orphan cleanup via Docker labels.
 
-See [`M1.md`](M1.md) for deployment and smoke-test instructions.
+See [`M1.md`](M1.md).
 
 ## M2 - GitHub integration
 
-- [ ] GitHub App authentication.
-- [ ] `workflow_job` webhook receiver and signature validation.
-- [ ] JIT/ephemeral runner configuration.
-- [ ] One-job runner lifecycle.
-- [ ] Labels and repository policy mapping.
+- [x] GitHub App JWT and installation-token authentication.
+- [x] `workflow_job` webhook receiver with HMAC-SHA256 validation.
+- [x] Repository JIT/ephemeral runner configuration.
+- [x] One-job Docker runner lifecycle and completed-job cleanup.
+- [x] CIFleet label -> OS/architecture/capability mapping.
+- [x] Persisted pending state, retries, duplicate-delivery idempotency and tombstones.
+- [x] Baseline public fork / `pull_request_target` denial.
+- [x] Controller-only identity enforcement on worker control endpoints.
+
+See [`M2.md`](M2.md).
 
 ## M3 - VM backends
 
@@ -39,11 +44,11 @@ See [`M1.md`](M1.md) for deployment and smoke-test instructions.
 - [ ] Threshold policy with hysteresis.
 - [ ] Organization/repository variable switcher.
 - [ ] Automatic monthly reset detection.
-- [ ] Public/untrusted PR safety policy.
+- [ ] Richer repository/actor trust policy beyond the M2 baseline.
 
 ## M5 - Operations
 
-- [ ] SQLite durable state.
+- [ ] SQLite durable state (replace M2 JSON state file).
 - [ ] Structured audit log.
 - [ ] Prometheus metrics.
 - [ ] Web dashboard (optional).

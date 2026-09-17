@@ -16,14 +16,8 @@ func LoadServerConfig(caFile, certFile, keyFile string) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load server certificate: %w", err)
 	}
-	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{cert},
-		ClientCAs:    pool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-	}, nil
+	return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert}, nil
 }
-
 func LoadClientConfig(caFile, certFile, keyFile, serverName string) (*tls.Config, error) {
 	pool, err := loadCAPool(caFile)
 	if err != nil {
@@ -33,14 +27,8 @@ func LoadClientConfig(caFile, certFile, keyFile, serverName string) (*tls.Config
 	if err != nil {
 		return nil, fmt.Errorf("load client certificate: %w", err)
 	}
-	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      pool,
-		ServerName:   serverName,
-	}, nil
+	return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}, RootCAs: pool, ServerName: serverName}, nil
 }
-
 func loadCAPool(path string) (*x509.CertPool, error) {
 	pem, err := os.ReadFile(path)
 	if err != nil {

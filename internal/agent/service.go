@@ -13,15 +13,10 @@ import (
 )
 
 type ServiceConfig struct {
-	NodeID            string
-	Endpoint          string
-	ControllerURL     string
-	HeartbeatInterval time.Duration
-	CleanupInterval   time.Duration
-	Capabilities      []string
-	Labels            []string
+	NodeID, Endpoint, ControllerURL    string
+	HeartbeatInterval, CleanupInterval time.Duration
+	Capabilities, Labels               []string
 }
-
 type Service struct {
 	cfg     ServiceConfig
 	backend Backend
@@ -38,7 +33,6 @@ func NewService(cfg ServiceConfig, b Backend, client *http.Client, log *slog.Log
 	}
 	return &Service{cfg: cfg, backend: b, client: client, log: log}
 }
-
 func (s *Service) Run(ctx context.Context) error {
 	if s.cfg.NodeID == "" {
 		return fmt.Errorf("node id is required")
@@ -49,12 +43,10 @@ func (s *Service) Run(ctx context.Context) error {
 	if s.client == nil {
 		return fmt.Errorf("http client is required")
 	}
-
 	heartbeatTicker := time.NewTicker(s.cfg.HeartbeatInterval)
 	cleanupTicker := time.NewTicker(s.cfg.CleanupInterval)
 	defer heartbeatTicker.Stop()
 	defer cleanupTicker.Stop()
-
 	s.sendHeartbeat(ctx)
 	s.cleanup(ctx)
 	for {
@@ -68,23 +60,13 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 }
-
 func (s *Service) sendHeartbeat(ctx context.Context) {
 	osName, arch, err := runtimePlatform()
 	if err != nil {
 		s.log.Error("cannot determine runtime platform", "error", err)
 		return
 	}
-
-	node := model.Node{
-		ID:           s.cfg.NodeID,
-		Endpoint:     s.cfg.Endpoint,
-		OS:           osName,
-		Arch:         arch,
-		Capabilities: append([]string(nil), s.cfg.Capabilities...),
-		Labels:       append([]string(nil), s.cfg.Labels...),
-		Online:       true,
-	}
+	node := model.Node{ID: s.cfg.NodeID, Endpoint: s.cfg.Endpoint, OS: osName, Arch: arch, Capabilities: append([]string(nil), s.cfg.Capabilities...), Labels: append([]string(nil), s.cfg.Labels...), Online: true}
 	capacity, err := s.backend.Capacity(ctx)
 	if err != nil {
 		s.log.Warn("capacity probe failed", "error", err)
@@ -92,7 +74,6 @@ func (s *Service) sendHeartbeat(ctx context.Context) {
 		node.Backends = []model.BackendKind{s.backend.Kind()}
 		node.Capacity = capacity
 	}
-
 	payload, err := json.Marshal(node)
 	if err != nil {
 		s.log.Error("encode heartbeat", "error", err)
@@ -116,11 +97,7 @@ func (s *Service) sendHeartbeat(ctx context.Context) {
 	}
 	s.log.Debug("heartbeat accepted", "node_id", s.cfg.NodeID)
 }
-
-func (s *Service) cleanup(ctx context.Context) {
-	s.cleanupAt(ctx, time.Now().UTC())
-}
-
+func (s *Service) cleanup(ctx context.Context) { s.cleanupAt(ctx, time.Now().UTC()) }
 func (s *Service) cleanupAt(ctx context.Context, now time.Time) {
 	removed, err := s.backend.CleanupExpired(ctx, now)
 	if err != nil {

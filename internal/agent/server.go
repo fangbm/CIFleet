@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,8 +19,9 @@ type Backend interface {
 }
 
 type Server struct {
-	NodeID  string
-	Backend Backend
+	NodeID             string
+	ControllerIdentity string
+	Backend            Backend
 }
 
 func (s *Server) Handler() http.Handler {
@@ -30,15 +32,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/instances/{id}", s.destroyInstance)
 	return mux
 }
-
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "node_id": s.NodeID, "goos": runtime.GOOS,
-		"goarch": runtime.GOARCH, "time": time.Now().UTC(),
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "node_id": s.NodeID, "goos": runtime.GOOS, "goarch": runtime.GOARCH, "time": time.Now().UTC()})
 }
-
 func (s *Server) capacity(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeController(w, r) {
+		return
+	}
 	if s.Backend == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "backend unavailable"})
 		return
@@ -50,8 +50,10 @@ func (s *Server) capacity(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, capacity)
 }
-
 func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeController(w, r) {
+		return
+	}
 	if s.Backend == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "backend unavailable"})
 		return
@@ -70,8 +72,10 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, instance)
 }
-
 func (s *Server) destroyInstance(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeController(w, r) {
+		return
+	}
 	if s.Backend == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "backend unavailable"})
 		return
@@ -86,6 +90,29 @@ func (s *Server) destroyInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) authorizeController(w http.ResponseWriter, r *http.Request) bool {
+	// Plain HTTP is only available through the explicit development flag. In mTLS mode,
+	// mutating worker APIs are restricted to the controller certificate rather than any
+	// certificate issued by the CIFleet CA.
+	if r.TLS == nil {
+		return true
+	}
+	wanted := s.ControllerIdentity
+	if wanted == "" {
+		wanted = "controller"
+	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "controller client certificate is required"})
+		return false
+	}
+	got := r.TLS.PeerCertificates[0].Subject.CommonName
+	if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(wanted)) != 1 {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "client certificate is not the CIFleet controller"})
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
