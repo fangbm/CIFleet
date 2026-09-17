@@ -15,10 +15,7 @@ own heterogeneous machines when needed (for example when hosted Actions quota is
               +----------------+----------------+
               |                |                |
         Linux x86_64      Linux arm64      Windows x86_64
-              |                |                |
-          E5-2666         Raspberry Pi       Windows PC
-              |                |                |
-        Docker / KVM         Docker           Hyper-V
+             
 ```
 
 macOS is intentionally not part of V1, but the scheduler and backend model leave room
