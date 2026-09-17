@@ -1,0 +1,25 @@
+nodes:
+  - id: e5
+    os: linux
+    arch: amd64
+    backends: [docker, kvm]
+    capabilities: [container, vm]
+
+  - id: raspberry
+    os: linux
+    arch: arm64
+    backends: [docker]
+    capabilities: [container, controller]
+
+  - id: win-pc
+    os: windows
+    arch: amd64
+    backends: [hyperv]
+    capabilities: [vm, msvc, windows-sdk]
+
+  # V2 example only
+  # - id: mac-mini
+  #   os: macos
+  #   arch: arm64
+  #   backends: [native]
+  #   capabilities: [xcode]

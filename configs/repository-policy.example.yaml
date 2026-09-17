@@ -1,0 +1,21 @@
+repository: fangbm/example
+trusted_only: true
+cache:
+  enabled: true
+  namespace: fangbm-example
+jobs:
+  default:
+    os: linux
+    arch: amd64
+    isolation: container
+    cpu: 2
+    memory_mb: 4096
+  arm64:
+    os: linux
+    arch: arm64
+    isolation: container
+  windows-native:
+    os: windows
+    arch: amd64
+    isolation: vm
+    capabilities: [msvc]
