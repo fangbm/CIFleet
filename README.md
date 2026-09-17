@@ -10,7 +10,6 @@ own heterogeneous machines when needed (for example when hosted Actions quota is
                          GitHub Actions
                                |
                         Go Controller
-                    (Raspberry Pi / always on)
                                |
               +----------------+----------------+
               |                |                |
